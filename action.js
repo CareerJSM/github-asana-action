@@ -73,9 +73,32 @@ async function action() {
     throw new Error('client authorization failed');
   }
 
-  console.info('looking in body', PULL_REQUEST.body, 'regex', REGEX_STRING);
+  // Handle both PR context and manual dispatch with PR_NUMBER
+  let prBody, prSha;
+  if (PULL_REQUEST) {
+    prBody = PULL_REQUEST.body;
+    prSha = PULL_REQUEST.head.sha;
+  } else if (process.env.PR_NUMBER) {
+    // For manually dispatched workflows, we need to fetch the PR details
+    const githubToken = core.getInput('github-token', { required: true });
+    const octokit = new github.GitHub(githubToken);
+    try {
+      const { data: pr } = await octokit.pulls.get({
+        ...github.context.repo,
+        pull_number: parseInt(process.env.PR_NUMBER)
+      });
+      prBody = pr.body;
+      prSha = pr.head.sha;
+    } catch (error) {
+      throw new Error(`Failed to fetch PR ${process.env.PR_NUMBER}: ${error.message}`);
+    }
+  } else {
+    throw new Error('No pull request context available. Either run in a PR context or provide PR_NUMBER environment variable.');
+  }
+
+  console.info('looking in body', prBody, 'regex', REGEX_STRING);
   let foundAsanaTasks = [];
-  while ((parseAsanaURL = REGEX.exec(PULL_REQUEST.body)) !== null) {
+  while ((parseAsanaURL = REGEX.exec(prBody)) !== null) {
     const taskId = parseAsanaURL.groups.task;
     if (!taskId) {
       core.error(`Invalid Asana task URL after the trigger phrase ${TRIGGER_PHRASE}`);
@@ -92,13 +115,13 @@ async function action() {
       const linkRequired = core.getInput('link-required', {required: true}) === 'true';
       const octokit = new github.GitHub(githubToken);
       const statusState = (!linkRequired || foundAsanaTasks.length > 0) ? 'success' : 'error';
-      core.info(`setting ${statusState} for ${github.context.payload.pull_request.head.sha}`);
+      core.info(`setting ${statusState} for ${prSha}`);
       octokit.repos.createStatus({
         ...github.context.repo,
         'context': 'asana-link-presence',
         'state': statusState,
         'description': 'asana link not found',
-        'sha': github.context.payload.pull_request.head.sha,
+        'sha': prSha,
       });
       break;
     }
