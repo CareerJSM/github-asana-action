@@ -80,7 +80,10 @@ async function action() {
     prSha = PULL_REQUEST.head.sha;
   } else if (process.env.PR_NUMBER) {
     // For manually dispatched workflows, we need to fetch the PR details
-    const githubToken = core.getInput('github-token', { required: true });
+    const githubToken = core.getInput('github-token');
+    if (!githubToken) {
+      throw new Error('github-token input is required when running from manually dispatched workflows with PR_NUMBER');
+    }
     const octokit = new github.GitHub(githubToken);
     try {
       const { data: pr } = await octokit.pulls.get({
